@@ -19,3 +19,4 @@ $id = $p->findOrCreateEntityTypeId('Test');
 echo "id: $id<BR/>";
 
 $p->insert('Customer', 'John Doe', array('firstname' => 'John', 'lastname' => 'Doe'));
+$p->delete('Customer', 'John Doe');

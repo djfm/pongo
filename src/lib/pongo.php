@@ -77,6 +77,28 @@ class Pongo
 		return $this->pdo->prepare(str_replace('__prefix__', $this->prefix, $stm_str));
 	}
 
+	public function find($table, $data)
+	{
+		$conditions = array();
+		$clauses = array();
+		foreach ($data as $key => $value)
+		{
+			$conditions[] = "$key = :$key";
+			$clauses[":$key"] = $value;
+		}
+		$find_stm_str = 'SELECT id FROM __prefix__'.$table.' WHERE '.implode(' AND ', $conditions);
+		$find_stm = $this->prepare($find_stm_str);
+		$find_stm->execute($clauses);
+		if ($result = $find_stm->fetch())
+		{
+			return $result['id'];
+		}
+		else
+		{
+			return null;
+		}
+	}
+
 	public function create($table, $data)
 	{
 		$clauses = array();
@@ -139,6 +161,46 @@ class Pongo
 		);
 	}
 
+	public function findEntityId($entity_type, $foreign_identifier, $options=array())
+	{
+		$stm = $this->prepare('
+			SELECT e.id from __prefix__entity_type t
+			INNER JOIN __prefix__entity e ON e.entity_type_id = t.id
+			WHERE 
+			t.name = :entity_type
+			AND e.foreign_identifier = :foreign_identifier
+		');
+		$stm->bindParam(':entity_type', $entity_type);
+		$stm->bindParam(':foreign_identifier', $foreign_identifier);
+		if (!$stm->execute())
+		{
+			print_r($this->pdo->errorInfo());
+			return null;
+		}
+		elseif ($result = $stm->fetch())
+		{
+			return $result['id'];
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	public function delete($entity_type, $foreign_identifier)
+	{
+		$entity_id = $this->findEntityId($entity_type, $foreign_identifier);
+		if ($entity_id)
+		{
+			$stm0 = $this->prepare('DELETE FROM __prefix__entity_i18n WHERE entity_id = :entity_id');
+			$stm0->bindParam(':entity_id', $entity_id);
+			$stm1 = $this->prepare('DELETE FROM __prefix__entity_characteristic_i18n WHERE entity_id = :entity_id');
+			$stm1->bindParam(':entity_id', $entity_id);
+			return $stm0->execute() && $stm1->execute();
+		}
+		return true;
+	}
+
 	public function insert($entity_type, $entity_name, $characteristics, $language_id=null, $foreign_identifier=null)
 	{
 		// Sorry for ugly one-liner but pretty simple logic :)
@@ -183,5 +245,16 @@ class Pongo
 		{
 			$this->create('entity_characteristic_i18n', $values);
 		}
+	}
+
+	public function replace($entity_type, $entity_name, $characteristics, $language_id=null, $foreign_identifier=null)
+	{
+		// Get an identifier for this entity
+		if ($foreign_identifier === null)
+		{
+			$foreign_identifier = is_string($entity_name) ? $entity_name : $entity_name['name'];
+		}
+		$this->delete($entity_type, $foreign_identifier);
+		$ths->insert($entity_type, $entity_name, $characteristics, $language_id, $foreign_identifier);
 	}
 }

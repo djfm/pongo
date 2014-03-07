@@ -15,8 +15,12 @@ else
 	die("Could not connect to mysql.");
 }
 
-$id = $p->findOrCreateEntityTypeId('Test');
-echo "id: $id<BR/>";
+$json = json_decode(file_get_contents(dirname(__FILE__).'/sample.json'), true);
 
-$p->insert('Customer', 'John Doe', array('firstname' => 'John', 'lastname' => 'Doe'));
-$p->delete('Customer', 'John Doe');
+foreach ($json['data'] as $key => $data)
+{
+	if (isset($data['characteristics']))
+	{
+		$p->insert($data['type'], $key, $data['characteristics']);
+	}
+}

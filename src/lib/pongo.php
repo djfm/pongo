@@ -443,6 +443,12 @@ class Pongo
 		$filters = array();
 		$limit = 10;
 
+		$conditions_set = array();
+		foreach ($conditions as $condition)
+		{
+			$conditions_set[] = $this->pdo->quote($condition['dimension'].':'.$condition['value']);
+		}
+
 		$entity_type_id = $this->find('entity_type', array('name' => $entity_type));
 
 		if ($entity_type_id)
@@ -511,6 +517,7 @@ class Pongo
 				AND edi.entity_type_id = $entity_type_id
 				AND %clause
 				%not_in
+				%useless
 				GROUP BY edi.name
 				ORDER BY score DESC
 				LIMIT $limit
@@ -526,9 +533,18 @@ class Pongo
 					$not_in = '';
 				}
 
+				if (count($conditions_set) > 0)
+				{
+					$useless = "AND concat(edi.name, ':', eci.value) NOT IN (".implode(', ', $conditions_set).")";
+				}
+				else
+				{
+					$useless = '';
+				}
+
 				$sql = str_replace(
-					array('%score', '%clause', '%join', '%not_in'), 
-					array($cs['score'], $cs['clause'], $cr ? $cr['join'] : '', $not_in),
+					array('%score', '%clause', '%join', '%not_in', '%useless'), 
+					array($cs['score'], $cs['clause'], $cr ? $cr['join'] : '', $not_in, $useless),
 					$sql
 				);
 
@@ -575,14 +591,9 @@ class Pongo
 				LIMIT $limit
 				";
 
-				if (count($conditions) > 0)
+				if (count($conditions_set) > 0)
 				{
-					$list = array();
-					foreach ($conditions as $condition)
-					{
-						$list[] = $this->pdo->quote($condition['dimension'].':'.$condition['value']);
-					}
-					$useless = "AND concat(edi.name, ':', eci.value) NOT IN (".implode(', ', $list).")";
+					$useless = "AND concat(edi.name, ':', eci.value) NOT IN (".implode(', ', $conditions_set).")";
 				}
 				else
 				{

@@ -30,7 +30,8 @@ CREATE  TABLE IF NOT EXISTS `__prefix__entity_dimension_i18n` (
   `name` VARCHAR(256) NOT NULL ,
   PRIMARY KEY (`id`) ,
   UNIQUE INDEX `dimension_language_idx` (`entity_type_id` ASC, `language_id` ASC, `name` ASC) ,
-  FULLTEXT INDEX `dimension_fulltext` (`name` ASC) )
+  FULLTEXT INDEX `dimension_fulltext_idx` (`name` ASC) ,
+  INDEX `dimension_idx` (`name` ASC) )
 ENGINE = MyISAM;
 
 
@@ -66,7 +67,8 @@ CREATE  TABLE IF NOT EXISTS `__prefix__entity_i18n` (
   `name` VARCHAR(256) NOT NULL ,
   `weight` FLOAT NOT NULL ,
   PRIMARY KEY (`id`) ,
-  FULLTEXT INDEX `entity_i18n_name_idx` (`name` ASC) ,
+  FULLTEXT INDEX `entity_i18n_name_fulltext_idx` (`name` ASC) ,
+  INDEX `entity_i18n_name_idx` (`name` ASC) ,
   UNIQUE INDEX `entity_i18n_name_language_idx` (`entity_id` ASC, `language_id` ASC) ,
   INDEX `entity_weight_idx` (`weight` ASC) )
 ENGINE = MyISAM;
@@ -85,7 +87,8 @@ CREATE  TABLE IF NOT EXISTS `__prefix__entity_characteristic_i18n` (
   `value` VARCHAR(256) NOT NULL ,
   `weight` FLOAT NOT NULL ,
   PRIMARY KEY (`id`) ,
-  FULLTEXT INDEX `entity_characteristic_value_idx` (`value` ASC) ,
+  FULLTEXT INDEX `entity_characteristic_value_fulltext_idx` (`value` ASC) ,
+  INDEX `entity_characteristic_value_idx` (`value` ASC) ,
   INDEX `entity_id_idx` (`entity_id` ASC) ,
   INDEX `entity_dimension_idx` (`entity_dimension_id` ASC, `language_id` ASC) ,
   INDEX `entity_characteristic_weight_idx` (`weight` ASC) )

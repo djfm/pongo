@@ -72,9 +72,24 @@ class Pongo
 		}
 	}
 
-	public function prepare($stm_str)
+	public function prepare()
 	{
-		return $this->pdo->prepare(str_replace('__prefix__', $this->prefix, $stm_str));
+		$args = func_get_args();
+
+		$stm = $this->pdo->prepare(str_replace('__prefix__', $this->prefix, $args[0]));
+
+		for ($i = 1; $i < count($args); $i += 1)
+		{
+			if (is_array($args[$i]))
+			{
+				foreach ($args[$i] as $key => $value)
+				{
+					$stm->bindValue($key, $value);
+				}
+			}
+		}
+
+		return $stm;
 	}
 
 	public function find($table, $data)
@@ -456,21 +471,7 @@ class Pongo
 					$sql = str_replace('%first_join', 'ei.entity_id', $sql);
 				}
 
-				$stm = $this->prepare($sql);
-				$stm->bindParam(':language_id', $language_id);
-
-				foreach ($cs['bind'] as $key => $v0)
-				{
-					$stm->bindParam($key, $v0);
-				}
-
-				if ($cr)
-				{
-					foreach ($cr['bind'] as $key => $v1)
-					{
-						$stm->bindParam($key, $v1);
-					}
-				}
+				$stm = $this->prepare($sql, $cs['bind'], $cr ? $cr['bind'] : null, array(':language_id' => $language_id));
 
 				if ($stm->execute())
 				{
@@ -488,25 +489,31 @@ class Pongo
 
 				$cs = $this->getMatchClauseAndScore('edi.name', $query);
 
-				$sql = "SELECT edi.name, %score as score
+				$sql = "SELECT edi.name, sum(%score) as score
 				FROM __prefix__entity_dimension_i18n edi
+				INNER JOIN __prefix__entity_characteristic_i18n eci ON eci.entity_dimension_id = edi.id
+				%join
 				WHERE edi.language_id = :language_id
 				AND edi.entity_type_id = $entity_type_id
 				AND %clause
+				GROUP BY edi.name
 				ORDER BY score DESC
 				LIMIT $limit
 				";
 
-				$sql = str_replace(array('%score', '%clause'), array($cs['score'], $cs['clause']), $sql);
+				$sql = str_replace(
+					array('%score', '%clause', '%join'), 
+					array($cs['score'], $cs['clause'], $cr ? $cr['join'] : ''),
+					$sql
+				);
 
-				$stm = $this->prepare($sql);
-
-				foreach ($cs['bind'] as $key => $value)
+				if ($cr)
 				{
-					$stm->bindParam($key, $value);
+					$sql = str_replace('%first_join', 'eci.entity_id', $sql);
 				}
 
-				$stm->bindParam(':language_id', $language_id);
+				$stm = $this->prepare($sql, $cs['bind'], $cr ? $cr['bind'] : null, array(':language_id' => $language_id));
+
 				if ($stm->execute())
 				{
 					while ($row = $stm->fetch())
@@ -526,29 +533,36 @@ class Pongo
 			{
 				$cs = $this->getMatchClauseAndScore('eci.value', $query);
 
-				$sql = "SELECT DISTINCT edi.name, eci.value, %score as score
+				$sql = "SELECT edi.name, eci.value, sum(%score) as score
 				FROM __prefix__entity_dimension_i18n edi
 				INNER JOIN __prefix__entity_characteristic_i18n eci
 				ON 
 					eci.entity_dimension_id = edi.id 
 					AND edi.language_id = :language_id
 					AND edi.entity_type_id = $entity_type_id
+				%join
 				WHERE
 					%clause
+				GROUP BY edi.name, eci.value
 				ORDER BY score DESC
 				LIMIT $limit
 				";
 
-				$sql = str_replace(array('%score', '%clause'), array($cs['score'], $cs['clause']), $sql);
+				$sql = str_replace(
+					array('%score', '%clause', '%join'), 
+					array($cs['score'], $cs['clause'], $cr ? $cr['join'] : ''),
+					$sql
+				);
+
+				if ($cr)
+				{
+					$sql = str_replace('%first_join', 'eci.entity_id', $sql);
+				}
 
 				$stm = $this->prepare($sql);
 
-				foreach ($cs['bind'] as $key => $value)
-				{
-					$stm->bindParam($key, $value);
-				}
-
-				$stm->bindParam(':language_id', $language_id);
+				$stm = $this->prepare($sql, $cs['bind'], $cr ? $cr['bind'] : null, array(':language_id' => $language_id));
+				
 				if ($stm->execute())
 				{
 					while ($row = $stm->fetch())

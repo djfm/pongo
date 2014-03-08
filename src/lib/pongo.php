@@ -291,6 +291,7 @@ class Pongo
 			{
 				$characteristics_for_insertion[] = array(
 					'entity_dimension_id' => $this->findOrCreateEntityDimensionId($entity_type_id, $language_id, $name),
+					'entity_id' => $entity_id,
 					'language_id' => $language_id,
 					'value' => $pair['value'],
 					'weight' => $pair['weight']
@@ -349,91 +350,226 @@ class Pongo
 		}
 	}
 
+	public function getConditionsRestriction($entity_type_id, $conditions, $language_id=null)
+	{
+		if (empty($conditions))
+		{
+			return null;
+		}
+
+		$language_id = $language_id === null ? ($this->language_id ? $this->language_id : 1) : 1;
+
+		$sql = "SELECT DISTINCT edi.name, edi.id FROM __prefix__entity_dimension_i18n edi
+		WHERE edi.language_id = $language_id
+		AND edi.entity_type_id = $entity_type_id
+		AND edi.name IN (%dimensions)
+		";
+
+		$dimensions_array = array();
+		foreach ($conditions as $condition)
+		{
+			$dimensions_array[] = $this->pdo->quote($condition['dimension']);
+		}
+		$dimensions = implode(', ', array_unique($dimensions_array));
+
+		$sql = str_replace('%dimensions', $dimensions, $sql);
+
+		$stm = $this->prepare($sql);
+
+		$dimension_ids = array();
+
+		if ($stm->execute())
+		{
+			while ($row = $stm->fetch())
+			{
+				$dimension_ids[$row['name']] = $row['id'];
+			}
+		}
+
+		$bind = array();
+		$eid = '%first_join';
+		$parts = array();
+
+		foreach ($conditions as $i => $condition)
+		{
+			$table = "cond_$i";
+			$ediid = $dimension_ids[$condition['dimension']];
+			$phldr = ":val_$i";
+
+
+			
+			$part = "INNER JOIN __prefix__entity_characteristic_i18n $table 
+			ON
+			$table.entity_id = $eid 
+			AND $table.entity_dimension_id = $ediid 
+			AND $table.value = $phldr";
+
+			$bind[$phldr] = $condition['value'];
+
+			$eid = "$table.entity_id";
+
+			$parts[] = $part;
+		}
+
+		$sql = implode("\n", $parts);
+
+		return array(
+			'join' => $sql,
+			'bind' => $bind 
+		);
+	}
+
 	public function select($entity_type, $conditions, $query, $dimension=null, $language_id=null)
 	{
 		$language_id = $language_id === null ? ($this->language_id ? $this->language_id : 1) : 1;
 
 		$entities = array();
 		$dimensions = array();
+		$filters = array();
 		$limit = 10;
 
 		$entity_type_id = $this->find('entity_type', array('name' => $entity_type));
 
 		if ($entity_type_id)
 		{
-			$cs = $this->getMatchClauseAndScore('ei.name', $query);
-
-			$sql = "SELECT ei.name, %score as score 
-			FROM __prefix__entity_i18n ei
-			WHERE ei.language_id = :language_id 
-			AND %clause
-			ORDER BY score DESC 
-			LIMIT $limit";
-
-			$sql = str_replace(array('%score', '%clause'), array($cs['score'], $cs['clause']), $sql);
-			//die($sql);
-			$stm = $this->prepare($sql);
-			$stm->bindParam(':language_id', $language_id);
-
-			foreach ($cs['bind'] as $key => $value)
+			$cr = $this->getConditionsRestriction($entity_type_id, $conditions, $language_id);
+			if ($dimension === null)
 			{
-				$stm->bindParam($key, $value);
-			}
+				$cs = $this->getMatchClauseAndScore('ei.name', $query);
 
-			if ($stm->execute())
-			{
-				while ($row = $stm->fetch())
+				$sql = "SELECT ei.name, %score as score 
+				FROM __prefix__entity_i18n ei
+				%join
+				WHERE ei.language_id = :language_id 
+				AND %clause
+				ORDER BY score DESC 
+				LIMIT $limit";
+
+				$sql = str_replace(
+					array('%score', '%clause', '%join'), 
+					array($cs['score'], $cs['clause'], $cr ? $cr['join'] : ''),
+					$sql
+				);
+
+				if ($cr)
 				{
-					$entities[] = array(
-						'score' => $row['score'],
-						'data' => array(
-							'name' => $row['name'],
-							'handle' => $row['name']
-						)
-					);
+					$sql = str_replace('%first_join', 'ei.entity_id', $sql);
+				}
+
+				$stm = $this->prepare($sql);
+				$stm->bindParam(':language_id', $language_id);
+
+				foreach ($cs['bind'] as $key => $v0)
+				{
+					$stm->bindParam($key, $v0);
+				}
+
+				if ($cr)
+				{
+					foreach ($cr['bind'] as $key => $v1)
+					{
+						$stm->bindParam($key, $v1);
+					}
+				}
+
+				if ($stm->execute())
+				{
+					while ($row = $stm->fetch())
+					{
+						$entities[] = array(
+							'score' => $row['score'],
+							'data' => array(
+								'name' => $row['name'],
+								'handle' => $row['name']
+							)
+						);
+					}
+				}
+
+				$cs = $this->getMatchClauseAndScore('edi.name', $query);
+
+				$sql = "SELECT edi.name, %score as score
+				FROM __prefix__entity_dimension_i18n edi
+				WHERE edi.language_id = :language_id
+				AND edi.entity_type_id = $entity_type_id
+				AND %clause
+				ORDER BY score DESC
+				LIMIT $limit
+				";
+
+				$sql = str_replace(array('%score', '%clause'), array($cs['score'], $cs['clause']), $sql);
+
+				$stm = $this->prepare($sql);
+
+				foreach ($cs['bind'] as $key => $value)
+				{
+					$stm->bindParam($key, $value);
+				}
+
+				$stm->bindParam(':language_id', $language_id);
+				if ($stm->execute())
+				{
+					while ($row = $stm->fetch())
+					{
+						//print_r($row);
+						$dimensions[] = array(
+							'score' => $row['score'],
+							'data' => array(
+								'handle' => $row['name'],
+								'dimension' => $row['name']
+							)
+						);
+					}
 				}
 			}
-
-			$cs = $this->getMatchClauseAndScore('edi.name', $query);
-
-			$sql = "SELECT edi.name, %score as score
-			FROM __prefix__entity_dimension_i18n edi
-			WHERE edi.language_id = :language_id
-			AND edi.entity_type_id = $entity_type_id
-			AND %clause
-			ORDER BY score DESC
-			LIMIT $limit
-			";
-
-			$sql = str_replace(array('%score', '%clause'), array($cs['score'], $cs['clause']), $sql);
-
-			$stm = $this->prepare($sql);
-
-			foreach ($cs['bind'] as $key => $value)
+			else
 			{
-				$stm->bindParam($key, $value);
-			}
-			
-			$stm->bindParam(':language_id', $language_id);
-			if ($stm->execute())
-			{
-				while ($row = $stm->fetch())
+				$cs = $this->getMatchClauseAndScore('eci.value', $query);
+
+				$sql = "SELECT DISTINCT edi.name, eci.value, %score as score
+				FROM __prefix__entity_dimension_i18n edi
+				INNER JOIN __prefix__entity_characteristic_i18n eci
+				ON 
+					eci.entity_dimension_id = edi.id 
+					AND edi.language_id = :language_id
+					AND edi.entity_type_id = $entity_type_id
+				WHERE
+					%clause
+				ORDER BY score DESC
+				LIMIT $limit
+				";
+
+				$sql = str_replace(array('%score', '%clause'), array($cs['score'], $cs['clause']), $sql);
+
+				$stm = $this->prepare($sql);
+
+				foreach ($cs['bind'] as $key => $value)
 				{
-					//print_r($row);
-					$dimensions[] = array(
-						'score' => $row['score'],
-						'data' => array(
-							'name' => $row['name'],
-							'handle' => $row['name']
-						)
-					);
+					$stm->bindParam($key, $value);
+				}
+
+				$stm->bindParam(':language_id', $language_id);
+				if ($stm->execute())
+				{
+					while ($row = $stm->fetch())
+					{
+						$filters[] = array(
+							'score' => $row['score'],
+							'data' => array(
+								'handle' => $row['value'],
+								'dimension' => $row['name'],
+								'value' => $row['value']
+							)
+						);
+					}
 				}
 			}
 		}
 
 		return array(
 			'entities' => $entities,
-			'dimensions' => $dimensions
+			'dimensions' => $dimensions,
+			'filters' => $filters
 		);
 	}
 }

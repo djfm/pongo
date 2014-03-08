@@ -18,7 +18,7 @@ $results = $pongo->select(
 	$input['type'],
 	$input['conditions'],
 	$input['query'],
-	$input['dimension'],
+	isset($input['dimension']) ? $input['dimension'] : null,
 	isset($input['language_id']) ? $input['language_id'] : null
 );
 

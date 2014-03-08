@@ -450,12 +450,18 @@ class Pongo
 			$cr = $this->getConditionsRestriction($entity_type_id, $conditions, $language_id);
 			if ($dimension === null)
 			{
+				/*
+				* Find Entities
+				*/
+
 				$cs = $this->getMatchClauseAndScore('ei.name', $query);
 
-				$sql = "SELECT ei.name, %score as score 
+				$sql = "SELECT ei.name, ei.entity_id, %score as score 
 				FROM __prefix__entity_i18n ei
+				INNER JOIN __prefix__entity e ON e.id = ei.entity_id
 				%join
-				WHERE ei.language_id = :language_id 
+				WHERE ei.language_id = :language_id
+				AND e.entity_type_id = $entity_type_id
 				AND %clause
 				ORDER BY score DESC 
 				LIMIT $limit";
@@ -473,6 +479,8 @@ class Pongo
 
 				$stm = $this->prepare($sql, $cs['bind'], $cr ? $cr['bind'] : null, array(':language_id' => $language_id));
 
+				$entity_ids = array();
+
 				if ($stm->execute())
 				{
 					while ($row = $stm->fetch())
@@ -484,8 +492,14 @@ class Pongo
 								'handle' => $row['name']
 							)
 						);
+
+						$entity_ids[] = $row['entity_id'];
 					}
 				}
+
+				/*
+				* Find Dimensions
+				*/
 
 				$cs = $this->getMatchClauseAndScore('edi.name', $query);
 
@@ -496,14 +510,25 @@ class Pongo
 				WHERE edi.language_id = :language_id
 				AND edi.entity_type_id = $entity_type_id
 				AND %clause
+				%not_in
 				GROUP BY edi.name
 				ORDER BY score DESC
 				LIMIT $limit
 				";
 
+				// Do not return dimensions that would not help filter further
+				if (count($entity_ids) > 0)
+				{
+					$not_in = 'AND eci.entity_id NOT IN ('.implode(', ', $entity_ids).')';
+				}
+				else
+				{
+					$not_in = '';
+				}
+
 				$sql = str_replace(
-					array('%score', '%clause', '%join'), 
-					array($cs['score'], $cs['clause'], $cr ? $cr['join'] : ''),
+					array('%score', '%clause', '%join', '%not_in'), 
+					array($cs['score'], $cs['clause'], $cr ? $cr['join'] : '', $not_in),
 					$sql
 				);
 
@@ -542,15 +567,31 @@ class Pongo
 					AND edi.entity_type_id = $entity_type_id
 				%join
 				WHERE
-					%clause
+					edi.name = :dimension
+					AND %clause
+					%useless
 				GROUP BY edi.name, eci.value
 				ORDER BY score DESC
 				LIMIT $limit
 				";
 
+				if (count($conditions) > 0)
+				{
+					$list = array();
+					foreach ($conditions as $condition)
+					{
+						$list[] = $this->pdo->quote($condition['dimension'].':'.$condition['value']);
+					}
+					$useless = "AND concat(edi.name, ':', eci.value) NOT IN (".implode(', ', $list).")";
+				}
+				else
+				{
+					$useless = '';
+				}
+
 				$sql = str_replace(
-					array('%score', '%clause', '%join'), 
-					array($cs['score'], $cs['clause'], $cr ? $cr['join'] : ''),
+					array('%score', '%clause', '%join', '%useless'), 
+					array($cs['score'], $cs['clause'], $cr ? $cr['join'] : '', $useless),
 					$sql
 				);
 
@@ -561,7 +602,11 @@ class Pongo
 
 				$stm = $this->prepare($sql);
 
-				$stm = $this->prepare($sql, $cs['bind'], $cr ? $cr['bind'] : null, array(':language_id' => $language_id));
+				$stm = $this->prepare($sql, $cs['bind'], $cr ? $cr['bind'] : null, array(
+						':language_id' => $language_id,
+						':dimension' => $dimension
+					)
+				);
 				
 				if ($stm->execute())
 				{
